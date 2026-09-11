@@ -22,7 +22,6 @@
   },
   "dependencies": {
     "@google-cloud/vision": "6.1.0",
-    "@prisma/adapter-better-sqlite3": "7.10.0",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "7.10.0",
     "@supabase/supabase-js": "2.116.0",
