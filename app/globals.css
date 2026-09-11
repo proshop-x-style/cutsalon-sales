@@ -1,26 +1,185 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #fff7ed;
+  --foreground: #3b2214;
+  --surface: rgba(255, 251, 245, 0.92);
+  --surface-border: rgba(251, 146, 60, 0.28);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-sans: var(--font-rounded);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-rounded), "Yu Gothic UI", "Hiragino Kaku Gothic ProN", sans-serif;
+}
+
+.page-surface {
+  background-image:
+    radial-gradient(circle at 10% 10%, rgba(251, 146, 60, 0.18), transparent 40%),
+    radial-gradient(circle at 92% 12%, rgba(250, 204, 21, 0.18), transparent 32%),
+    linear-gradient(180deg, #fffaf2 0%, #fff1d6 100%);
+}
+
+.glass-card {
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
+  box-shadow: 0 10px 28px rgba(180, 83, 9, 0.1);
+  backdrop-filter: blur(8px);
+}
+
+.pressable {
+  transition: transform 100ms ease, box-shadow 120ms ease, background-color 120ms ease;
+}
+
+.pressable:active {
+  transform: translateY(1px) scale(0.98);
+}
+
+@media (max-width: 767px) {
+  .ui-scale-large .text-xs {
+    font-size: 0.92rem !important;
+    line-height: 1.35rem !important;
+  }
+
+  .ui-scale-large .text-sm {
+    font-size: 1.02rem !important;
+    line-height: 1.5rem !important;
+  }
+
+  .ui-scale-large .text-base {
+    font-size: 1.16rem !important;
+    line-height: 1.72rem !important;
+  }
+
+  .ui-scale-large .text-lg {
+    font-size: 1.26rem !important;
+    line-height: 1.85rem !important;
+  }
+
+  .ui-scale-large .text-2xl {
+    font-size: 1.68rem !important;
+    line-height: 2.1rem !important;
+  }
+
+  .ui-scale-large .text-4xl {
+    font-size: 2.1rem !important;
+    line-height: 2.45rem !important;
+  }
+
+  .ui-scale-large .mobile-summary-card {
+    min-width: 238px !important;
+  }
+
+  .ui-scale-xlarge .text-xs {
+    font-size: 1rem !important;
+    line-height: 1.5rem !important;
+  }
+
+  .ui-scale-xlarge .text-sm {
+    font-size: 1.12rem !important;
+    line-height: 1.62rem !important;
+  }
+
+  .ui-scale-xlarge .text-base {
+    font-size: 1.24rem !important;
+    line-height: 1.86rem !important;
+  }
+
+  .ui-scale-xlarge .text-lg {
+    font-size: 1.38rem !important;
+    line-height: 2rem !important;
+  }
+
+  .ui-scale-xlarge .text-2xl {
+    font-size: 1.86rem !important;
+    line-height: 2.3rem !important;
+  }
+
+  .ui-scale-xlarge .text-4xl {
+    font-size: 2.35rem !important;
+    line-height: 2.7rem !important;
+  }
+
+  .ui-scale-xlarge .mobile-summary-card {
+    min-width: 258px !important;
+  }
+
+  .ui-scale-xlarge .txn-row {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    row-gap: 0.45rem;
+  }
+
+  .ui-scale-xlarge .txn-main {
+    width: 100%;
+  }
+
+  .ui-scale-xlarge .txn-vendor {
+    max-width: 100%;
+  }
+
+  .ui-scale-xlarge .txn-meta {
+    line-height: 1.6rem !important;
+  }
+
+  .ui-scale-xlarge .txn-amount {
+    margin-left: auto;
+    font-size: 1.44rem !important;
+    line-height: 1.95rem !important;
+  }
+
+  .ui-scale-large input,
+  .ui-scale-large select,
+  .ui-scale-large button,
+  .ui-scale-xlarge input,
+  .ui-scale-xlarge select,
+  .ui-scale-xlarge button {
+    max-width: 100%;
+  }
+}
+
+@media print {
+  body {
+    background: #ffffff;
+  }
+
+  .page-surface {
+    background: #ffffff !important;
+    padding: 0 !important;
+  }
+
+  .glass-card {
+    border: none !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    background: #ffffff !important;
+  }
+
+  .pressable,
+  input,
+  select,
+  .fixed {
+    display: none !important;
+  }
+
+  .ledger-print-area {
+    display: block !important;
+    margin: 0;
+    padding: 0;
+  }
+
+  .ledger-print-area table {
+    font-size: 11pt;
+  }
+
+  .ledger-print-area th,
+  .ledger-print-area td {
+    border: 1px solid #d0d7de;
+  }
 }

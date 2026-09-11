@@ -1,26 +1,95 @@
 {
   "name": "app",
   "version": "0.1.0",
+  "description": "Salon bookkeeping desktop and web app",
+  "author": "Cutsalon",
   "private": true,
+  "main": "electron/main.cjs",
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --hostname 0.0.0.0",
     "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
+    "start": "next start --hostname 0.0.0.0",
+    "desktop:dev": "concurrently -k \"npm run dev\" \"wait-on http://localhost:3000 && electron .\"",
+    "desktop:open": "electron .",
+    "desktop:clean": "powershell -NoProfile -Command \"if (Test-Path dist-installer) { Remove-Item dist-installer -Recurse -Force }\"",
+    "desktop:dist": "npm run build && electron-builder --win nsis",
+    "desktop:pack": "npm run build && electron-builder --win --dir",
+    "desktop:portable": "npm run build && electron-builder --win portable",
+    "lint": "eslint",
+    "test": "vitest --run",
+    "typecheck": "tsc --noEmit",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
+    "@google-cloud/vision": "6.1.0",
+    "@prisma/adapter-better-sqlite3": "7.10.0",
+    "@prisma/client": "7.10.0",
+    "@supabase/supabase-js": "2.116.0",
+    "dotenv": "^17.4.2",
     "next": "16.3.4",
+    "prisma": "7.10.0",
+    "qrcode": "^1.5.4",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.3",
     "@types/node": "^20",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^5.2.0",
+    "concurrently": "^10.0.5",
+    "electron": "^44.3.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
+    "jsdom": "^25.0.1",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.2.7",
+    "wait-on": "^9.1.0"
+  },
+  "build": {
+    "appId": "com.cutsalon.ledger",
+    "productName": "Salon Ledger",
+    "asar": false,
+    "npmRebuild": false,
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
+    "files": [
+      "app/**/*",
+      "components/**/*",
+      "electron/**/*",
+      "lib/**/*",
+      "public/**/*",
+      "prisma/**/*",
+      ".next/**/*",
+      "next.config.ts",
+      "package.json",
+      "node_modules/**/*",
+      "!**/*.test.ts",
+      "!**/*.test.tsx",
+      "!vitest/**/*"
+    ],
+    "extraMetadata": {
+      "main": "electron/main.cjs"
+    },
+    "directories": {
+      "output": "dist-installer"
+    },
+    "win": {
+      "icon": "build/app-icon.ico",
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "build/app-icon.ico",
+      "uninstallerIcon": "build/app-icon.ico"
+    }
   }
 }

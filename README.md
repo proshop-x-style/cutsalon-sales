@@ -1,36 +1,53 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# サロン売上・経費ダッシュボード
 
-## Getting Started
+日次入力から月次・年次・累計までをまとめて管理できるアプリです。
 
-First, run the development server:
+## Webで起動
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+1. npm run dev
+2. ブラウザで http://localhost:3000 を開く
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## デスクトップアプリとして起動
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. npm run desktop:dev
+2. Next.js起動後にElectronウィンドウが開きます
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+補足:
+- npm run desktop:open は既にローカルでWebサーバーが起動中のときに使います。
+- デスクトップ版は通常アプリのような独立ウィンドウで使えます。
 
-## Learn More
+## Windows向け .exe を作成
 
-To learn more about Next.js, take a look at the following resources:
+1. npm run desktop:dist
+2. 生成物は dist/ または dist-installer/ に作られます
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+補足:
+- まず軽量確認したい場合は npm run desktop:pack を使うと展開形式で出力されます。
+- 初回は時間がかかることがあります。
+- すぐ実行する場合は dist/win-unpacked/Salon Ledger.exe を起動できます。
+- 単一の実行ファイルを出したい場合は npm run desktop:portable を使います。
+- Setup形式が生成されない環境でも、win-unpacked は通常アプリとしてそのまま利用できます。
+- win-unpacked が使用中で失敗する場合は、起動中のアプリを閉じて npm run desktop:clean を実行してから再ビルドしてください。
+- 代表的な出力例: dist/Salon Ledger Setup 0.1.0.exe
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 署名付き配布（任意）
 
-## Deploy on Vercel
+1. .env へ CSC_LINK と CSC_KEY_PASSWORD を設定
+2. npm run desktop:dist を実行
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+補足:
+- 未設定でもローカル配布は可能です。
+- 署名設定をすると、配布時の警告を減らせます。
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## 検証コマンド
+
+1. npm run test
+2. npm run typecheck
+3. npm run build
+
+## 許可ポップアップを減らす
+
+Copilot Chat でコマンド実行確認が多い場合は、チャット下部の Default permissions から以下を Allow に設定します。
+
+1. Terminal command
+2. Dependency install
