@@ -23,10 +23,12 @@
   "dependencies": {
     "@google-cloud/vision": "6.1.0",
     "@prisma/adapter-better-sqlite3": "7.10.0",
+    "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "7.10.0",
     "@supabase/supabase-js": "2.116.0",
     "dotenv": "^17.4.2",
     "next": "16.3.4",
+    "pg": "^8.23.0",
     "prisma": "7.10.0",
     "qrcode": "^1.5.4",
     "react": "19.2.8",
