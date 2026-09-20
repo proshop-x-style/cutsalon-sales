@@ -190,14 +190,49 @@ const getMenuHref = (menu: AppMenu) => {
   return `/${menu}`;
 };
 
-const formatSalesBreakdownNote = (breakdown: { adult: string; junior: string; child: string; monk: string }) => (
-  `大人:${toCount(breakdown.adult)},中学:${toCount(breakdown.junior)},小人:${toCount(breakdown.child)},坊主:${toCount(breakdown.monk)}`
+type SalesBreakdown = {
+  adult: string;
+  junior: string;
+  child: string;
+  monk: string;
+  fringe: string;
+  selfShampoo: string;
+  styleChange: string;
+  adultSelfShampoo: string;
+};
+
+const emptySalesBreakdown: SalesBreakdown = {
+  adult: '',
+  junior: '',
+  child: '',
+  monk: '',
+  fringe: '',
+  selfShampoo: '',
+  styleChange: '',
+  adultSelfShampoo: '',
+};
+
+const extraMenuUnitPrices = {
+  fringe: 500,
+  selfShampoo: 200,
+  styleChange: 2300,
+  adultSelfShampoo: 2000,
+};
+
+const calculateExtraMenuTotal = (breakdown: SalesBreakdown) => (
+  toCount(breakdown.fringe) * extraMenuUnitPrices.fringe
+  + toCount(breakdown.selfShampoo) * extraMenuUnitPrices.selfShampoo
+  + toCount(breakdown.styleChange) * extraMenuUnitPrices.styleChange
+  + toCount(breakdown.adultSelfShampoo) * extraMenuUnitPrices.adultSelfShampoo
 );
 
-const parseSalesBreakdownNote = (note: string) => {
-  const initial = { adult: '', junior: '', child: '', monk: '' };
+const formatSalesBreakdownNote = (breakdown: SalesBreakdown) => (
+  `大人:${toCount(breakdown.adult)},中学:${toCount(breakdown.junior)},小人:${toCount(breakdown.child)},坊主:${toCount(breakdown.monk)},前髪カット:${toCount(breakdown.fringe)},セルフシャンプー:${toCount(breakdown.selfShampoo)},スタイルチェンジ:${toCount(breakdown.styleChange)},大人セルフ:${toCount(breakdown.adultSelfShampoo)}`
+);
+
+const parseSalesBreakdownNote = (note: string): SalesBreakdown => {
   if (!note) {
-    return initial;
+    return { ...emptySalesBreakdown };
   }
 
   const pairs = note.split(',').map((entry) => entry.trim());
@@ -215,6 +250,10 @@ const parseSalesBreakdownNote = (note: string) => {
     junior: read('中学'),
     child: read('小人'),
     monk: read('坊主'),
+    fringe: read('前髪カット'),
+    selfShampoo: read('セルフシャンプー'),
+    styleChange: read('スタイルチェンジ'),
+    adultSelfShampoo: read('大人セルフ'),
   };
 };
 
@@ -367,12 +406,7 @@ export function LedgerPage({ initialMenu }: LedgerPageProps) {
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
   const [sharedPinSetting, setSharedPinSetting] = useState('1214');
-  const [dailyBreakdown, setDailyBreakdown] = useState({
-    adult: '',
-    junior: '',
-    child: '',
-    monk: '',
-  });
+  const [dailyBreakdown, setDailyBreakdown] = useState<SalesBreakdown>({ ...emptySalesBreakdown });
   const deleteUndoTimerRef = useRef<number | null>(null);
   const loadRequestRef = useRef(0);
 
@@ -951,7 +985,7 @@ export function LedgerPage({ initialMenu }: LedgerPageProps) {
       junior: { count: toCount(dailyBreakdown.junior), unitPrice: 1500, amount: 0 },
       child: { count: toCount(dailyBreakdown.child), unitPrice: 1200, amount: 0 },
       monk: { count: toCount(dailyBreakdown.monk), unitPrice: 1500, amount: 0 },
-    }),
+    }) + calculateExtraMenuTotal(dailyBreakdown),
     [dailyBreakdown],
   );
   const changedFields = useMemo(() => {
@@ -1113,7 +1147,7 @@ export function LedgerPage({ initialMenu }: LedgerPageProps) {
     };
   }, []);
 
-  const updateDailyBreakdownField = (field: 'adult' | 'junior' | 'child' | 'monk', rawValue: string) => {
+  const updateDailyBreakdownField = (field: keyof SalesBreakdown, rawValue: string) => {
     setDailyBreakdown((current) => ({
       ...current,
       [field]: rawValue,
@@ -1216,7 +1250,7 @@ export function LedgerPage({ initialMenu }: LedgerPageProps) {
       productName: '',
     });
 
-    setDailyBreakdown({ adult: '', junior: '', child: '', monk: '' });
+    setDailyBreakdown({ ...emptySalesBreakdown });
     setSelectedMonth(form.date.slice(0, 7));
     setEditingTransactionId(null);
     setEditingSnapshot(null);
@@ -1611,7 +1645,7 @@ export function LedgerPage({ initialMenu }: LedgerPageProps) {
       category: '現金売上',
       productName: '',
     });
-    setDailyBreakdown({ adult: '', junior: '', child: '', monk: '' });
+    setDailyBreakdown({ ...emptySalesBreakdown });
     setStatusMessage('修正モードを終了しました。');
   };
 
@@ -2287,13 +2321,65 @@ export function LedgerPage({ initialMenu }: LedgerPageProps) {
                     className={inputClassName}
                   />
                 </label>
+                <label className="space-y-2 text-base font-semibold text-stone-700">
+                  <span>前髪カット(500円)</span>
+                  <input
+                    id="sales-count-fringe"
+                    type="text"
+                    inputMode="numeric"
+                    value={dailyBreakdown.fringe}
+                    onChange={(event) => updateDailyBreakdownField('fringe', event.target.value)}
+                    onInput={(event) => updateDailyBreakdownField('fringe', (event.target as HTMLInputElement).value)}
+                    placeholder="件数"
+                    className={inputClassName}
+                  />
+                </label>
+                <label className="space-y-2 text-base font-semibold text-stone-700">
+                  <span>セルフシャンプー(200円)</span>
+                  <input
+                    id="sales-count-self-shampoo"
+                    type="text"
+                    inputMode="numeric"
+                    value={dailyBreakdown.selfShampoo}
+                    onChange={(event) => updateDailyBreakdownField('selfShampoo', event.target.value)}
+                    onInput={(event) => updateDailyBreakdownField('selfShampoo', (event.target as HTMLInputElement).value)}
+                    placeholder="件数"
+                    className={inputClassName}
+                  />
+                </label>
+                <label className="space-y-2 text-base font-semibold text-stone-700">
+                  <span>スタイルチェンジ(2300円)</span>
+                  <input
+                    id="sales-count-style-change"
+                    type="text"
+                    inputMode="numeric"
+                    value={dailyBreakdown.styleChange}
+                    onChange={(event) => updateDailyBreakdownField('styleChange', event.target.value)}
+                    onInput={(event) => updateDailyBreakdownField('styleChange', (event.target as HTMLInputElement).value)}
+                    placeholder="件数"
+                    className={inputClassName}
+                  />
+                </label>
+                <label className="space-y-2 text-base font-semibold text-stone-700">
+                  <span>大人+セルフシャンプー(2000円)</span>
+                  <input
+                    id="sales-count-adult-self-shampoo"
+                    type="text"
+                    inputMode="numeric"
+                    value={dailyBreakdown.adultSelfShampoo}
+                    onChange={(event) => updateDailyBreakdownField('adultSelfShampoo', event.target.value)}
+                    onInput={(event) => updateDailyBreakdownField('adultSelfShampoo', (event.target as HTMLInputElement).value)}
+                    placeholder="件数"
+                    className={inputClassName}
+                  />
+                </label>
               </div>
 
               <div className="rounded-2xl border border-orange-200 bg-gradient-to-r from-orange-50 to-yellow-50 p-4">
                 <p className="text-sm font-semibold text-stone-600">自動計算された1日の売上</p>
                 <p id="sales-total-preview" className="mt-2 text-3xl font-black text-orange-700">¥{computedAmountPreview.toLocaleString()}</p>
                 <p id="sales-debug-preview" className="mt-2 text-xs font-semibold text-orange-700 break-words">
-                  debug: A{dailyBreakdown.adult || '0'} / J{dailyBreakdown.junior || '0'} / C{dailyBreakdown.child || '0'} / M{dailyBreakdown.monk || '0'}
+                  debug: A{dailyBreakdown.adult || '0'} / J{dailyBreakdown.junior || '0'} / C{dailyBreakdown.child || '0'} / M{dailyBreakdown.monk || '0'} / F{dailyBreakdown.fringe || '0'} / SS{dailyBreakdown.selfShampoo || '0'} / SC{dailyBreakdown.styleChange || '0'} / AS{dailyBreakdown.adultSelfShampoo || '0'}
                 </p>
               </div>
 
