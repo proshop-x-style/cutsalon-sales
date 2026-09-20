@@ -19,6 +19,9 @@
 
 # production
 /build
+/dist
+/dist-installer
+.cache
 
 # misc
 .DS_Store
@@ -40,3 +43,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+.vercel
+.env*

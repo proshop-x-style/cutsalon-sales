@@ -1,0 +1,19 @@
+# Build artifacts
+.next
+build
+dist
+dist-installer
+
+# Dependencies
+node_modules
+
+# Local and secret files
+.env
+.env.local
+.env.*.local
+secrets
+
+# Logs and temp
+*.log
+*.tmp
+*.cache

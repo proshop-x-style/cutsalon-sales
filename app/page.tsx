@@ -1,15 +1,42 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { parseTransactionsCsv } from '@/lib/csvImport';
 import { calculateBreakdownTotal } from '@/lib/dailyReportParser';
 import { transactionsToCsv } from '@/lib/csvExport';
 import { DEFAULT_EXPENSE_CATEGORIES } from '@/lib/expenseCategories';
 import { getAvailableMonths, summarizeMonthlyTransactions } from '@/lib/monthlySummary';
-import { summarizeTransactions, type Transaction } from '@/lib/transactions';
+import {
+  DEFAULT_SHARED_PIN,
+  PIN_FAILURE_KEY,
+  PIN_HASH_KEY,
+  PIN_LOCKED_KEY,
+  PIN_SESSION_KEY,
+  clearPinSession,
+  incrementPinFailureCount,
+  isPinLocked,
+  isPinSessionAlive,
+  lockPin,
+  resetPinFailureCount,
+  saveSharedPin,
+  storePinSession,
+  verifySharedPin,
+} from '@/lib/pinAuth';
+import {
+  normalizeTransactionsPayload,
+  readLastGoodBackup,
+  resolveLoadedTransactions,
+  summarizeTransactions,
+  type Transaction,
+  writeLastGoodBackup,
+} from '@/lib/transactions';
 import { getAvailableYears, summarizeYearlyTransactions } from '@/lib/yearlySummary';
 
-const STORAGE_KEY = 'salon-ledger-transactions';
 const TEXT_SCALE_KEY = 'salon-ledger-text-scale';
+const TRANSACTION_CACHE_KEY = 'salon-ledger-transactions-cache';
+const TRANSACTION_CACHE_BACKUP_KEY = 'salon-ledger-transactions-cache-backup';
+const LAST_GOOD_BACKUP_KEY = 'salon-ledger-last-good-backup';
+let globalLedgerTransactions: Transaction[] = [];
 
 type TextScale = 'normal' | 'large' | 'xlarge';
 type AppMenu = 'home' | 'sales' | 'expenses' | 'analysis' | 'submit' | 'settings';
@@ -191,53 +218,6 @@ const parseSalesBreakdownNote = (note: string) => {
   };
 };
 
-const seedTransactions: Transaction[] = [
-  {
-    id: 'seed-1',
-    date: '2026-09-09',
-    type: '売上',
-    vendorName: '券売機日計表',
-    amount: 32500,
-    category: '現金売上',
-    sourceType: 'daily_report',
-    note: '本日の売上',
-    createdAt: '2026-09-09T00:00:00.000Z',
-  },
-  {
-    id: 'seed-2',
-    date: '2026-09-09',
-    type: '経費',
-    vendorName: 'Amazon',
-    amount: 1800,
-    category: '消耗品費',
-    sourceType: 'manual',
-    note: 'ヘアケア用品',
-    createdAt: '2026-09-09T00:00:00.000Z',
-  },
-  {
-    id: 'seed-3',
-    date: '2026-09-08',
-    type: '売上',
-    vendorName: '券売機日計表',
-    amount: 29600,
-    category: '現金売上',
-    sourceType: 'daily_report',
-    note: '前日売上',
-    createdAt: '2026-09-08T00:00:00.000Z',
-  },
-  {
-    id: 'seed-4',
-    date: '2026-09-08',
-    type: '経費',
-    vendorName: '飲食店',
-    amount: 4200,
-    category: '交際費',
-    sourceType: 'manual',
-    note: '接待費',
-    createdAt: '2026-09-08T00:00:00.000Z',
-  },
-];
-
 const expenseCategories = [...DEFAULT_EXPENSE_CATEGORIES];
 const quickExpenseCategories = DEFAULT_EXPENSE_CATEGORIES.slice(0, 6);
 const issueSectionId = 'submission-issues';
@@ -271,7 +251,93 @@ export function LedgerPage({ initialMenu }: LedgerPageProps) {
     note: '',
   };
 
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>(globalLedgerTransactions);
+
+  const persistTransactionCache = (nextTransactions: Transaction[]) => {
+    if (nextTransactions.length === 0) {
+      globalLedgerTransactions = [];
+      window.localStorage.removeItem(TRANSACTION_CACHE_KEY);
+      window.localStorage.removeItem(TRANSACTION_CACHE_BACKUP_KEY);
+      window.localStorage.removeItem(LAST_GOOD_BACKUP_KEY);
+      return;
+    }
+
+    globalLedgerTransactions = nextTransactions;
+
+    try {
+      const rawCurrent = window.localStorage.getItem(TRANSACTION_CACHE_KEY);
+      const parsedCurrent = rawCurrent ? normalizeTransactionsPayload(JSON.parse(rawCurrent)) : null;
+      const hasExistingData = !!parsedCurrent && parsedCurrent.length > 0;
+
+      if (nextTransactions.length === 0 && hasExistingData) {
+        const rawBackup = window.localStorage.getItem(TRANSACTION_CACHE_BACKUP_KEY);
+        if (rawBackup) {
+          window.localStorage.setItem(TRANSACTION_CACHE_KEY, rawBackup);
+        }
+        return;
+      }
+
+      const serialized = JSON.stringify(nextTransactions);
+      window.localStorage.setItem(TRANSACTION_CACHE_KEY, serialized);
+
+      if (nextTransactions.length > 0) {
+        window.localStorage.setItem(TRANSACTION_CACHE_BACKUP_KEY, serialized);
+        writeLastGoodBackup(nextTransactions, LAST_GOOD_BACKUP_KEY);
+      }
+    } catch {
+      // ignore storage quota issues; data remains in the database
+    }
+  };
+
+  const hydrateTransactionsFromCache = () => {
+    try {
+      if (globalLedgerTransactions.length > 0) {
+        setTransactions(globalLedgerTransactions);
+        return globalLedgerTransactions;
+      }
+
+      const rawCache = window.localStorage.getItem(TRANSACTION_CACHE_KEY);
+      const rawBackup = window.localStorage.getItem(TRANSACTION_CACHE_BACKUP_KEY);
+      const lastGoodTransactions = readLastGoodBackup(LAST_GOOD_BACKUP_KEY);
+
+      const tryRead = (raw: string | null) => {
+        if (!raw) {
+          return null;
+        }
+
+        try {
+          const cachedTransactions = normalizeTransactionsPayload(JSON.parse(raw));
+          if (cachedTransactions && cachedTransactions.length > 0) {
+            return cachedTransactions;
+          }
+        } catch {
+          // ignore malformed cache entries and continue to the backup value
+        }
+
+        return null;
+      };
+
+      const primaryTransactions = tryRead(rawCache);
+      if (primaryTransactions) {
+        globalLedgerTransactions = primaryTransactions;
+        setTransactions(primaryTransactions);
+        return primaryTransactions;
+      }
+
+      const backupTransactions = tryRead(rawBackup) ?? lastGoodTransactions;
+      if (backupTransactions) {
+        globalLedgerTransactions = backupTransactions;
+        setTransactions(backupTransactions);
+        persistTransactionCache(backupTransactions);
+        return backupTransactions;
+      }
+    } catch {
+      // fallback to server fetch below
+    }
+
+    return null;
+  };
+
   const [form, setForm] = useState<TransactionForm>(initialForm);
   const [activeMenu, setActiveMenu] = useState<AppMenu>(initialMenu);
   const [selectedMonth, setSelectedMonth] = useState(currentMonth);
@@ -297,7 +363,10 @@ export function LedgerPage({ initialMenu }: LedgerPageProps) {
   const [installPromptEvent, setInstallPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [canInstall, setCanInstall] = useState(false);
   const [notificationEnabled, setNotificationEnabled] = useState(false);
-  const [isResettingData, setIsResettingData] = useState(false);
+  const [isPinUnlocked, setIsPinUnlocked] = useState(false);
+  const [pinInput, setPinInput] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [sharedPinSetting, setSharedPinSetting] = useState('1214');
   const [dailyBreakdown, setDailyBreakdown] = useState({
     adult: '',
     junior: '',
@@ -305,45 +374,146 @@ export function LedgerPage({ initialMenu }: LedgerPageProps) {
     monk: '',
   });
   const deleteUndoTimerRef = useRef<number | null>(null);
+  const loadRequestRef = useRef(0);
 
   useEffect(() => {
+    setTransactions(globalLedgerTransactions);
+    setIsPinUnlocked(isPinSessionAlive());
+  }, []);
+
+  useEffect(() => {
+    globalLedgerTransactions = transactions;
+  }, [transactions]);
+
+  const handlePinSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!pinInput.trim()) {
+      setPinError('PINを入力してください。');
+      return;
+    }
+
+    if (isPinLocked()) {
+      setPinError('PINの入力回数が上限に達したため、8時間後に再試行できます。');
+      return;
+    }
+
+    let isValid = false;
+    try {
+      isValid = await verifySharedPin(pinInput);
+    } catch {
+      setPinError('PIN認証に失敗しました。「PINを1214にリセット」を押して再試行してください。');
+      return;
+    }
+
+    if (!isValid) {
+      const failureCount = incrementPinFailureCount();
+      if (failureCount >= 10) {
+        lockPin();
+        setPinError('PIN入力回数が上限に達したため、8時間ロックされました。');
+        setPinInput('');
+        return;
+      }
+
+      setPinError(`PINが違います。残り${10 - failureCount}回まで入力できます。`);
+      setPinInput('');
+      return;
+    }
+
+    resetPinFailureCount();
+    storePinSession();
+    setIsPinUnlocked(true);
+    setPinError('');
+    setPinInput('');
+    setStatusMessage('PIN認証でアクセスしました。');
+  };
+
+  const handlePinSave = async () => {
+    const trimmed = sharedPinSetting.trim();
+    if (!trimmed || trimmed.length < 4) {
+      setStatusMessage('共有PINは4桁以上で設定してください。');
+      return;
+    }
+
+    await saveSharedPin(trimmed);
+    setStatusMessage('共有PINを更新しました。');
+    setSharedPinSetting(trimmed);
+    clearPinSession();
+    setIsPinUnlocked(false);
+  };
+
+  const handlePinRecoveryToDefault = () => {
+    window.localStorage.removeItem(PIN_HASH_KEY);
+    window.localStorage.removeItem(PIN_LOCKED_KEY);
+    window.localStorage.removeItem(PIN_FAILURE_KEY);
+    window.localStorage.removeItem(PIN_SESSION_KEY);
+    setSharedPinSetting(DEFAULT_SHARED_PIN);
+    setPinInput('');
+    setPinError('PIN状態をリセットしました。デフォルトPIN 1214でログインしてください。');
+  };
+
+  useEffect(() => {
+    const requestId = ++loadRequestRef.current;
+    let isActive = true;
+
     const loadTransactions = async () => {
+      const cachedTransactions = hydrateTransactionsFromCache();
+      if (!isActive || requestId !== loadRequestRef.current) {
+        return;
+      }
+
+      if (cachedTransactions) {
+        setStatusMessage('保存済みデータを復元しました。');
+      }
+
       try {
         const response = await fetch('/api/transactions');
         if (!response.ok) {
           throw new Error('request failed');
         }
 
-        const data = (await response.json()) as Transaction[];
-        if (Array.isArray(data)) {
-          setTransactions(data);
+        const data = await response.json();
+
+        if (!isActive || requestId !== loadRequestRef.current) {
           return;
         }
+
+        setTransactions((current) => {
+          const fallbackTransactions = cachedTransactions ?? globalLedgerTransactions ?? current;
+          const nextTransactions = resolveLoadedTransactions(current, data, fallbackTransactions);
+          if (nextTransactions !== current) {
+            persistTransactionCache(nextTransactions);
+          }
+          return nextTransactions;
+        });
+        return;
       } catch {
-        // fallback to local storage and default demo data
-      }
-
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        try {
-          const parsed = JSON.parse(raw) as Transaction[];
-          setTransactions(parsed);
+        if (!isActive || requestId !== loadRequestRef.current) {
           return;
-        } catch {
-          // ignore invalid local storage data
         }
-      }
 
-      setTransactions(seedTransactions);
+        if (cachedTransactions) {
+          setStatusMessage('サーバー応答が失敗したため、保存済みデータを復元しました。');
+          return;
+        }
+
+        setStatusMessage('データの再読込に失敗しました。既存データは保持されています。');
+      }
     };
 
     loadTransactions();
 
+    return () => {
+      isActive = false;
+      loadRequestRef.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
     const savedScale = window.localStorage.getItem(TEXT_SCALE_KEY);
     if (savedScale === 'normal' || savedScale === 'large' || savedScale === 'xlarge') {
       setTextScale(savedScale);
     }
-
   }, []);
 
   useEffect(() => {
@@ -375,14 +545,6 @@ export function LedgerPage({ initialMenu }: LedgerPageProps) {
   }, [activeMenu]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(transactions));
-    }, 250);
-
-    return () => window.clearTimeout(timer);
-  }, [transactions]);
-
-  useEffect(() => {
     window.localStorage.setItem(TEXT_SCALE_KEY, textScale);
   }, [textScale]);
 
@@ -394,6 +556,11 @@ export function LedgerPage({ initialMenu }: LedgerPageProps) {
 
     const savedNotifications = window.localStorage.getItem('salon-ledger-notifications');
     setNotificationEnabled(savedNotifications === 'on');
+
+    const savedPin = window.localStorage.getItem('salon-ledger-shared-pin-hash');
+    if (savedPin) {
+      setSharedPinSetting('1214');
+    }
   }, []);
 
   useEffect(() => {
@@ -997,13 +1164,14 @@ export function LedgerPage({ initialMenu }: LedgerPageProps) {
 
       if (response.ok) {
         const saved = (await response.json()) as Transaction;
+        let nextTransactions: Transaction[];
         if (editingTransactionId) {
-          setTransactions((current) =>
-            current.map((transaction) => (transaction.id === editingTransactionId ? saved : transaction)),
-          );
+          nextTransactions = transactions.map((transaction) => (transaction.id === editingTransactionId ? saved : transaction));
         } else {
-          setTransactions((current) => [saved, ...current]);
+          nextTransactions = [saved, ...transactions];
         }
+        setTransactions(nextTransactions);
+        persistTransactionCache(nextTransactions);
       } else {
         const next: Transaction = {
           id: editingTransactionId ?? `txn-${Date.now()}`,
@@ -1011,13 +1179,14 @@ export function LedgerPage({ initialMenu }: LedgerPageProps) {
           sourceType: payload.sourceType as Transaction['sourceType'],
           createdAt: new Date().toISOString(),
         };
+        let nextTransactions: Transaction[];
         if (editingTransactionId) {
-          setTransactions((current) =>
-            current.map((transaction) => (transaction.id === editingTransactionId ? next : transaction)),
-          );
+          nextTransactions = transactions.map((transaction) => (transaction.id === editingTransactionId ? next : transaction));
         } else {
-          setTransactions((current) => [next, ...current]);
+          nextTransactions = [next, ...transactions];
         }
+        setTransactions(nextTransactions);
+        persistTransactionCache(nextTransactions);
       }
     } catch {
       const next: Transaction = {
@@ -1026,13 +1195,14 @@ export function LedgerPage({ initialMenu }: LedgerPageProps) {
         sourceType: payload.sourceType as Transaction['sourceType'],
         createdAt: new Date().toISOString(),
       };
+      let nextTransactions: Transaction[];
       if (editingTransactionId) {
-        setTransactions((current) =>
-          current.map((transaction) => (transaction.id === editingTransactionId ? next : transaction)),
-        );
+        nextTransactions = transactions.map((transaction) => (transaction.id === editingTransactionId ? next : transaction));
       } else {
-        setTransactions((current) => [next, ...current]);
+        nextTransactions = [next, ...transactions];
       }
+      setTransactions(nextTransactions);
+      persistTransactionCache(nextTransactions);
     } finally {
       setIsSaving(false);
     }
@@ -1092,6 +1262,85 @@ export function LedgerPage({ initialMenu }: LedgerPageProps) {
     anchor.remove();
     URL.revokeObjectURL(url);
     setStatusMessage('CSVをダウンロードしました。');
+  };
+
+  const restoreTransactionsFromCsvText = async (csvText: string) => {
+    const nextTransactions = parseTransactionsCsv(csvText);
+
+    try {
+      const deleteResponse = await fetch('/api/transactions', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmReset: true }),
+      });
+
+      if (!deleteResponse.ok) {
+        throw new Error('restore clear failed');
+      }
+    } catch {
+      setStatusMessage('既存データの初期化に失敗したため、CSV復元を中止しました。');
+      return;
+    }
+
+    const results = await Promise.all(
+      nextTransactions.map(async (transaction) => {
+        const payload = {
+          date: transaction.date,
+          type: transaction.type,
+          vendorName: transaction.vendorName,
+          productName: transaction.productName ?? '',
+          amount: transaction.amount,
+          category: transaction.category,
+          sourceType: transaction.sourceType,
+          note: transaction.note ?? '',
+        };
+
+        return fetch('/api/transactions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      }),
+    );
+
+    const failedCount = results.filter((response) => !response.ok).length;
+    if (failedCount > 0) {
+      setStatusMessage(`CSV復元で${failedCount}件の保存に失敗しました。`);
+      return;
+    }
+
+    setTransactions(nextTransactions);
+    persistTransactionCache(nextTransactions);
+    setRecentlyDeleted(null);
+    setEditingTransactionId(null);
+    setEditingSnapshot(null);
+    setForm((current) => ({
+      ...current,
+      date: toLocalIsoDate(new Date()),
+    }));
+    setStatusMessage(`CSVから${nextTransactions.length}件を復元しました。`);
+  };
+
+  const handleCsvImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    const confirmed = window.confirm('CSVの内容で現在の全データを置き換えます。続行しますか？');
+    if (!confirmed) {
+      event.target.value = '';
+      return;
+    }
+
+    try {
+      const csvText = await file.text();
+      await restoreTransactionsFromCsvText(csvText);
+    } catch {
+      setStatusMessage('CSV復元に失敗しました。アプリから保存したCSVを選択してください。');
+    } finally {
+      event.target.value = '';
+    }
   };
 
   const generateTaxShareUrl = async () => {
@@ -1385,9 +1634,11 @@ export function LedgerPage({ initialMenu }: LedgerPageProps) {
       try {
         const refreshed = await fetch('/api/transactions');
         if (refreshed.ok) {
-          const data = (await refreshed.json()) as Transaction[];
-          if (Array.isArray(data)) {
-            setTransactions(data);
+          const data = await refreshed.json();
+          const nextTransactions = normalizeTransactionsPayload(data);
+          if (nextTransactions) {
+            setTransactions(nextTransactions);
+            persistTransactionCache(nextTransactions);
           }
         }
       } catch {
@@ -1397,7 +1648,9 @@ export function LedgerPage({ initialMenu }: LedgerPageProps) {
       // keep local behavior consistent even when API is unavailable
     }
 
-    setTransactions((current) => current.filter((transaction) => transaction.id !== transactionId));
+    const nextTransactions = transactions.filter((transaction) => transaction.id !== transactionId);
+    setTransactions(nextTransactions);
+    persistTransactionCache(nextTransactions);
     if (editingTransactionId === transactionId) {
       cancelEditing();
     }
@@ -1442,41 +1695,44 @@ export function LedgerPage({ initialMenu }: LedgerPageProps) {
     setStatusMessage('削除を取り消しました。');
   };
 
-  const handleResetData = async () => {
-    if (isResettingData) {
-      return;
-    }
+  if (!isPinUnlocked) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-stone-100 px-4 py-8">
+        <div className="w-full max-w-md rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
+          <p className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-700">Shared Access</p>
+          <h1 className="mt-3 text-2xl font-black text-stone-900">PINでログイン</h1>
+          <p className="mt-2 text-sm text-stone-600">共有URLを使う場合は、設定したPINを入力してください。</p>
 
-    const confirmed = window.confirm('登録した売上・経費データをすべて初期化します。よろしいですか？');
-    if (!confirmed) {
-      return;
-    }
+          <form onSubmit={handlePinSubmit} className="mt-6 space-y-4">
+            <label className="block text-sm font-semibold text-stone-700">
+              PIN
+              <input
+                type="password"
+                inputMode="numeric"
+                value={pinInput}
+                onChange={(event) => setPinInput(event.target.value.replace(/\D/g, '').slice(0, 8))}
+                className="mt-2 w-full rounded-xl border border-stone-300 bg-stone-50 px-4 py-3 text-center text-xl font-black tracking-[0.3em] text-stone-900 outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-200"
+                placeholder="123456"
+              />
+            </label>
 
-    setIsResettingData(true);
+            {pinError && <p className="text-sm font-semibold text-rose-600">{pinError}</p>}
 
-    try {
-      await fetch('/api/transactions', { method: 'DELETE' });
-    } catch {
-      // If the API is unavailable, still clear local state below.
-    }
-
-    window.localStorage.removeItem(STORAGE_KEY);
-    setTransactions([]);
-    setRecentlyDeleted(null);
-    setEditingTransactionId(null);
-    setEditingSnapshot(null);
-    setForm({
-      ...initialForm,
-      date: toLocalIsoDate(new Date()),
-      type: '売上',
-      vendorName: '券売機日計表',
-      category: '現金売上',
-      productName: '',
-    });
-    setDailyBreakdown({ adult: '', junior: '', child: '', monk: '' });
-    setStatusMessage('データを初期化しました。');
-    setIsResettingData(false);
-  };
+            <button type="submit" className="pressable w-full rounded-xl bg-cyan-700 px-4 py-3 text-base font-bold text-white">
+              ログイン
+            </button>
+            <button
+              type="button"
+              onClick={handlePinRecoveryToDefault}
+              className="pressable w-full rounded-xl border border-stone-300 bg-white px-4 py-3 text-sm font-bold text-stone-700"
+            >
+              PINを1214にリセット
+            </button>
+          </form>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className={`page-surface ui-scale-${textScale} min-h-screen px-3 py-4 pb-8 text-stone-800 md:px-4 md:py-8 md:pb-8`}>
@@ -2352,7 +2608,25 @@ export function LedgerPage({ initialMenu }: LedgerPageProps) {
               </div>
 
               <div className="rounded-xl border border-stone-200 bg-white p-3">
-                <p className="text-sm font-semibold text-stone-600">バックアップ</p>
+                <p className="text-sm font-semibold text-stone-600">共有PIN</p>
+                <div className="mt-2 flex gap-2">
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    value={sharedPinSetting}
+                    onChange={(event) => setSharedPinSetting(event.target.value.replace(/\D/g, '').slice(0, 8))}
+                    className="w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2 text-base font-bold text-stone-900 outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-200"
+                    placeholder="123456"
+                  />
+                  <button type="button" onClick={handlePinSave} className="pressable rounded-xl bg-cyan-700 px-3 py-2 text-sm font-bold text-white">
+                    保存
+                  </button>
+                </div>
+                <p className="mt-2 text-xs text-stone-500">共有URLで開いた人は、このPINを入力して使います。</p>
+              </div>
+
+              <div className="rounded-xl border border-stone-200 bg-white p-3">
+                <p className="text-sm font-semibold text-stone-600">データ出力</p>
                 <button
                   type="button"
                   onClick={handleCsvExport}
@@ -2360,6 +2634,12 @@ export function LedgerPage({ initialMenu }: LedgerPageProps) {
                 >
                   CSVを保存する
                 </button>
+                <label className="mt-2 block">
+                  <input type="file" accept=".csv,text/csv" onChange={handleCsvImport} className="hidden" />
+                  <span className="pressable flex h-11 w-full items-center justify-center rounded-xl border border-emerald-300 bg-emerald-50 text-sm font-bold text-emerald-800">
+                    CSVから復元する
+                  </span>
+                </label>
                 {canInstall && (
                   <button
                     type="button"
@@ -2369,19 +2649,6 @@ export function LedgerPage({ initialMenu }: LedgerPageProps) {
                     アプリをインストール
                   </button>
                 )}
-              </div>
-
-              <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 md:col-span-2">
-                <p className="text-sm font-semibold text-rose-800">データ初期化</p>
-                <p className="mt-1 text-xs text-rose-700">売上・経費データをすべて消して、最初から使い直します。</p>
-                <button
-                  type="button"
-                  onClick={handleResetData}
-                  disabled={isResettingData}
-                  className="mt-2 pressable h-11 w-full rounded-xl bg-rose-600 text-sm font-bold text-white disabled:bg-rose-300"
-                >
-                  {isResettingData ? '初期化中...' : 'データを初期化する'}
-                </button>
               </div>
 
               <div className="rounded-xl border border-stone-200 bg-white p-3 md:col-span-2">
