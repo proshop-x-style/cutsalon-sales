@@ -2020,11 +2020,11 @@ export function LedgerPage({ initialMenu }: LedgerPageProps) {
         {activeMenu === 'analysis' && (
         <section className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
           {cards.map((card) => (
-            <div key={card.label} className="glass-card rounded-2xl p-4 md:p-5">
+            <div key={card.label} className="glass-card min-w-0 rounded-2xl p-4 md:p-5">
               <p className="text-base font-semibold text-stone-500">{card.label}</p>
-              <p className={`mt-3 text-4xl font-black ${card.tone}`}>{card.value}</p>
+              <p className={`mt-3 break-words text-2xl font-black sm:text-3xl md:text-4xl ${card.tone}`}>{card.value}</p>
               {'subText' in card && card.subText && (
-                <p className="mt-2 text-xs font-semibold text-stone-500">{card.subText}</p>
+                <p className="mt-2 break-words text-xs font-semibold text-stone-500">{card.subText}</p>
               )}
             </div>
           ))}
