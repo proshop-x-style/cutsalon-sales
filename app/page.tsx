@@ -2270,7 +2270,7 @@ export function LedgerPage({ initialMenu }: LedgerPageProps) {
 
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="space-y-2 text-base font-semibold text-stone-700">
-                  <span>大人</span>
+                  <span>大人(1800円)</span>
                   <input
                     id="sales-count-adult"
                     type="text"
@@ -2283,7 +2283,7 @@ export function LedgerPage({ initialMenu }: LedgerPageProps) {
                   />
                 </label>
                 <label className="space-y-2 text-base font-semibold text-stone-700">
-                  <span>中高生</span>
+                  <span>中高生(1500円)</span>
                   <input
                     id="sales-count-junior"
                     type="text"
@@ -2296,7 +2296,7 @@ export function LedgerPage({ initialMenu }: LedgerPageProps) {
                   />
                 </label>
                 <label className="space-y-2 text-base font-semibold text-stone-700">
-                  <span>小学生以下</span>
+                  <span>小学生以下(1200円)</span>
                   <input
                     id="sales-count-child"
                     type="text"
@@ -2309,7 +2309,7 @@ export function LedgerPage({ initialMenu }: LedgerPageProps) {
                   />
                 </label>
                 <label className="space-y-2 text-base font-semibold text-stone-700">
-                  <span>坊主</span>
+                  <span>坊主(1500円)</span>
                   <input
                     id="sales-count-monk"
                     type="text"
